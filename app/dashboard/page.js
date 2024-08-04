@@ -1,5 +1,4 @@
 // app/dashboard/page.js
-// app/dashboard/page.js
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -17,10 +16,10 @@ import {
   Paper,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit'; // Import EditIcon
+import EditIcon from '@mui/icons-material/Edit';
 import { collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
-import { parse } from 'json2csv'; // Import json2csv parse function
+import * as XLSX from 'xlsx';
 
 const Dashboard = () => {
   const [items, setItems] = useState([]);
@@ -28,14 +27,15 @@ const Dashboard = () => {
   const [quantity, setQuantity] = useState('');
   const [expiry, setExpiry] = useState('');
   const [editingItem, setEditingItem] = useState(null);
-  const [editItem, setEditItem] = useState('');
-  const [editQuantity, setEditQuantity] = useState('');
-  const [editExpiry, setEditExpiry] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
       const querySnapshot = await getDocs(collection(db, 'pantryDetails'));
-      const itemsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const itemsData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        Expiry: doc.data().Expiry.toDate()
+      }));
       setItems(itemsData);
     };
     fetchData();
@@ -47,7 +47,12 @@ const Dashboard = () => {
       Quantity: Number(quantity),
       Expiry: new Date(expiry),
     });
-    setItems([...items, { id: docRef.id, Item: newItem, Quantity: Number(quantity), Expiry: new Date(expiry) }]);
+    setItems([...items, {
+      id: docRef.id,
+      Item: newItem,
+      Quantity: Number(quantity),
+      Expiry: new Date(expiry)
+    }]);
     setNewItem('');
     setQuantity('');
     setExpiry('');
@@ -60,58 +65,46 @@ const Dashboard = () => {
 
   const startEditing = (item) => {
     setEditingItem(item);
-    setEditItem(item.Item);
-    setEditQuantity(item.Quantity);
-    setEditExpiry(new Date(item.Expiry.seconds * 1000).toISOString().split('T')[0]); // Format date for editing
+    setNewItem(item.Item);
+    setQuantity(item.Quantity.toString());
+    setExpiry(item.Expiry.toISOString().split('T')[0]);
+  };
+
+  const cancelEditing = () => {
+    setEditingItem(null);
+    setNewItem('');
+    setQuantity('');
+    setExpiry('');
   };
 
   const saveEdit = async () => {
-    if (editingItem) {
-      await updateDoc(doc(db, 'pantryDetails', editingItem.id), {
-        Item: editItem,
-        Quantity: Number(editQuantity),
-        Expiry: new Date(editExpiry),
-      });
-      setItems(items.map(item => 
-        item.id === editingItem.id 
-          ? { ...item, Item: editItem, Quantity: Number(editQuantity), Expiry: new Date(editExpiry) } 
-          : item
-      ));
-      setEditingItem(null);
-      setEditItem('');
-      setEditQuantity('');
-      setEditExpiry('');
-    }
+    const itemRef = doc(db, 'pantryDetails', editingItem.id);
+    await updateDoc(itemRef, {
+      Item: newItem,
+      Quantity: Number(quantity),
+      Expiry: new Date(expiry),
+    });
+    setItems(items.map(item =>
+      item.id === editingItem.id
+        ? { ...item, Item: newItem, Quantity: Number(quantity), Expiry: new Date(expiry) }
+        : item
+    ));
+    setEditingItem(null);
+    setNewItem('');
+    setQuantity('');
+    setExpiry('');
   };
 
-  const exportData = async () => {
-    try {
-      // Fetch the current items from Firestore
-      const querySnapshot = await getDocs(collection(db, 'pantryDetails'));
-      const itemsData = querySnapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          ...data,
-          Expiry: new Date(data.Expiry.seconds * 1000).toLocaleDateString(), // Convert timestamp to date string
-        };
-      });
-
-      // Convert JSON data to CSV format using json2csv library
-      const csv = parse(itemsData);
-
-      // Create a blob with the CSV data
-      const blob = new Blob([csv], { type: 'text/csv' });
-
-      // Create a download link and click it programmatically to trigger download
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = 'pantry_items.csv';
-      link.click();
-
-    } catch (error) {
-      console.error('Error exporting data:', error);
-      // Handle error as needed
-    }
+  const exportData = () => {
+    const dataToExport = items.map(item => ({
+      Item: item.Item,
+      Quantity: item.Quantity,
+      Expiry: item.Expiry.toISOString().split('T')[0]
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Pantry Data');
+    XLSX.writeFile(workbook, 'pantry_data.xlsx');
   };
 
   return (
@@ -179,9 +172,20 @@ const Dashboard = () => {
             onChange={(e) => setExpiry(e.target.value)}
             sx={{ flexGrow: 1 }}
           />
-          <Button variant="contained" color="primary" onClick={addItem}>
-            Add
-          </Button>
+          {editingItem ? (
+            <>
+              <Button variant="contained" color="primary" onClick={saveEdit}>
+                Save
+              </Button>
+              <Button variant="contained" onClick={cancelEditing}>
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button variant="contained" color="primary" onClick={addItem}>
+              Add
+            </Button>
+          )}
         </Box>
         <Paper elevation={3} sx={{ padding: '20px', borderRadius: '10px', backgroundColor: '#A1B5C1', color: 'white' }}>
           <List>
@@ -189,7 +193,7 @@ const Dashboard = () => {
               <ListItem key={item.id} sx={{ mb: '10px' }}>
                 <ListItemText
                   primary={item.Item}
-                  secondary={`Quantity: ${item.Quantity} - Expiry: ${new Date(item.Expiry.seconds * 1000).toLocaleDateString()}`}
+                  secondary={`Quantity: ${item.Quantity} - Expiry: ${item.Expiry.toDateString()}`}
                 />
                 <ListItemSecondaryAction>
                   <IconButton edge="end" aria-label="edit" onClick={() => startEditing(item)}>
@@ -203,39 +207,7 @@ const Dashboard = () => {
             ))}
           </List>
         </Paper>
-        {editingItem && (
-          <Box sx={{ marginTop: '20px', textAlign: 'center' }}>
-            <Typography variant="h6" gutterBottom>Edit Item</Typography>
-            <Box sx={{ display: 'flex', gap: '10px', mb: '20px' }}>
-              <TextField
-                label="Item"
-                value={editItem}
-                onChange={(e) => setEditItem(e.target.value)}
-                sx={{ flexGrow: 1 }}
-              />
-              <TextField
-                label="Quantity"
-                type="number"
-                value={editQuantity}
-                onChange={(e) => setEditQuantity(e.target.value)}
-                sx={{ flexGrow: 1 }}
-              />
-              <TextField
-                label="Expiry Date"
-                type="date"
-                InputLabelProps={{ shrink: true }}
-                value={editExpiry}
-                onChange={(e) => setEditExpiry(e.target.value)}
-                sx={{ flexGrow: 1 }}
-              />
-              <Button variant="contained" color="primary" onClick={saveEdit}>
-                Save
-              </Button>
-            </Box>
-          </Box>
-        )}
-        {/* Export Data button */}
-        <Button variant="contained" color="primary" onClick={exportData} sx={{ mt: '20px' }}>
+        <Button variant="contained" color="primary" onClick={exportData} sx={{ mt: 2 }}>
           Export Data
         </Button>
       </Box>
@@ -244,3 +216,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+
