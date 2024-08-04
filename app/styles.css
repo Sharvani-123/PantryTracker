@@ -1,0 +1,15 @@
+/* styles.css */
+
+.animated-button {
+    animation: pop-in-out 1.5s infinite;
+  }
+  
+  @keyframes pop-in-out {
+    0%, 100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.1);
+    }
+  }
+  
